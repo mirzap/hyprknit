@@ -15,6 +15,7 @@ struct State {
   SP<Config::Values::CIntValue> width;
   SP<Config::Values::CIntValue> rows;
   SP<Config::Values::CIntValue> rounding;
+  SP<Config::Values::CIntValue> focusTransition;
   SP<Config::Values::CFloatValue> dim;
   SP<Config::Values::CStringValue> pattern;
   SP<Config::Values::CStringValue> stitch;

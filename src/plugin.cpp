@@ -135,6 +135,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
       "plugin:hyprknit:rounding",
       "Window corner radius the knit follows, or -1 to use the window's own",
       -1, Config::Values::SIntValueOptions{.min = -1, .max = 64});
+  state.focusTransition =
+      declare<Int>("plugin:hyprknit:focus_transition_ms",
+                   "How long focus dimming takes in milliseconds", 250,
+                   Config::Values::SIntValueOptions{.min = 0, .max = 2000});
   state.dim = declare<Float>(
       "plugin:hyprknit:dim", "How far an unfocused window's band is darkened",
       0.3F, Config::Values::SFloatValueOptions{.min = 0.F, .max = 1.F});

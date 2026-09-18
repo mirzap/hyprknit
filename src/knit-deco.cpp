@@ -109,15 +109,16 @@ void KnitDecoration::renderPass(PHLMONITOR monitor, float alpha) {
   // the window's rounded rect and that rect grown by the border width.
   const auto configured = state.rounding->value();
   const double windowRadius = configured >= 0 ? configured : window->rounding();
+  const float targetDim = Desktop::focusState()->isWindowActive(window)
+                              ? 0.F
+                              : std::clamp<float>(state.dim->value(), 0.F, 1.F);
 
   const Signature wanted{
       .frameWidth = static_cast<int>(frame.width),
       .frameHeight = static_cast<int>(frame.height),
       .width = width,
       .radius = windowRadius * monitor->m_scale + width,
-      .dim = Desktop::focusState()->isWindowActive(window)
-                 ? 0.F
-                 : std::clamp<float>(state.dim->value(), 0.F, 1.F),
+      .dim = animatedDim(targetDim),
       .generation = state.generation,
   };
   rebuildTextures(wanted);
@@ -133,6 +134,38 @@ void KnitDecoration::renderPass(PHLMONITOR monitor, float alpha) {
     box.translate({frame.x, frame.y});
     g_pHyprOpenGL->renderTexture(piece.texture, box, renderData);
   }
+}
+
+float KnitDecoration::animatedDim(float target) {
+  const auto now = std::chrono::steady_clock::now();
+  const int durationMs = std::max<Config::INTEGER>(
+      state.focusTransition ? state.focusTransition->value() : 0, 0);
+
+  if (m_displayDim < 0.F || durationMs == 0) {
+    m_displayDim = target;
+    m_startDim = target;
+    m_targetDim = target;
+    m_transitionStarted = now;
+    return target;
+  }
+
+  if (target != m_targetDim) {
+    m_startDim = m_displayDim;
+    m_targetDim = target;
+    m_transitionStarted = now;
+  }
+
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           now - m_transitionStarted)
+                           .count();
+  const float progress = std::clamp(
+      static_cast<float>(elapsed) / static_cast<float>(durationMs), 0.F, 1.F);
+  const float eased = progress * progress * (3.F - 2.F * progress);
+  m_displayDim = std::lerp(m_startDim, m_targetDim, eased);
+
+  if (progress < 1.F)
+    damageEntire();
+  return m_displayDim;
 }
 
 void KnitDecoration::rebuildTextures(const Signature &wanted) {

@@ -3,6 +3,7 @@
 #define WLR_USE_UNSTABLE
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <string>
 
@@ -52,6 +53,7 @@ private:
   };
 
   void pickYarn();
+  float animatedDim(float target);
   void rebuildTextures(const Signature &wanted);
   CBox assignedBoxGlobal() const;
 
@@ -64,6 +66,10 @@ private:
   int m_chart = -1;
   Signature m_knitted;
   bool m_lastEnabled = false;
+  float m_displayDim = -1.F;
+  float m_startDim = 0.F;
+  float m_targetDim = -1.F;
+  std::chrono::steady_clock::time_point m_transitionStarted;
 };
 
 } // namespace hyprknit

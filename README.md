@@ -31,6 +31,9 @@ and the window-facing inside of the knitted band. Right click takes the sweaters
 off or puts them back on, and
 scrolling over the yarn steps through the shared patterns.
 
+Focus changes ease between the active and unfocused wool brightness. The menu
+offers transition presets from Off to Slow; Smooth (250 ms) is the default.
+
 When an Omarchy update upgrades Hyprland, the next login notices and rebuilds the
 knitting for it before loading. Until you log back in, it will not load into the
 old Hyprland still running, which is exactly the mismatch that would crash it.
@@ -90,6 +93,7 @@ Every setting can be changed live, without a rebuild:
 ./hyprknitctl rows 8             # stitch rows across the band
 ./hyprknitctl basket sorbet      # wool for apps without their own colourway
 ./hyprknitctl dim 0.25           # darken unfocused windows
+./hyprknitctl transition 400     # focus fade duration in milliseconds
 ./hyprknitctl status             # what is currently on the needles
 ```
 
@@ -108,6 +112,7 @@ hl.config({
       rows = 6,
       rounding = -1, -- follow each window's own rounding
       dim = 0.3,
+      focus_transition_ms = 250,
     },
   },
 })

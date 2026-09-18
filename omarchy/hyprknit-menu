@@ -3,7 +3,8 @@
 #
 #   hyprknit-menu                 the knitting menu
 #   hyprknit-menu pattern         jump straight to one setting's choices
-#                                 (pattern, width, rounding, rows, basket, dim)
+#                                 (pattern, width, rounding, rows, basket, dim,
+#                                  transition)
 #   hyprknit-menu toggle          take the sweaters off, or put them back on
 #   hyprknit-menu next|previous   step through the shared patterns
 #
@@ -206,6 +207,44 @@ rounding_menu() {
 	esac
 }
 
+transition_title() {
+	local duration
+	duration=$(get focus_transition_ms)
+	if [[ $duration == 0 ]]; then
+		echo "Off"
+	else
+		printf '%s ms\n' "$duration"
+	fi
+}
+
+transition_menu() {
+	local current choice
+	current=$(get focus_transition_ms)
+	transition_row() {
+		local label=$1 value=$2
+		if [[ $current == "$value" ]]; then
+			printf '✨\t%s\tcurrent' "$label"
+		elif [[ $value == 0 ]]; then
+			printf '✨\t%s' "$label"
+		else
+			printf '✨\t%s\t%s ms' "$label" "$value"
+		fi
+	}
+	choice=$(pick "Focus transition" \
+		"$(transition_row Off 0)" \
+		"$(transition_row Snappy 120)" \
+		"$(transition_row Smooth 250)" \
+		"$(transition_row Gentle 400)" \
+		"$(transition_row Slow 600)")
+	case $choice in
+	Off) set_number focus_transition_ms 0 ;;
+	Snappy) set_number focus_transition_ms 120 ;;
+	Smooth) set_number focus_transition_ms 250 ;;
+	Gentle) set_number focus_transition_ms 400 ;;
+	Slow) set_number focus_transition_ms 600 ;;
+	esac
+}
+
 # Building shows progress, and a password prompt if build tools are missing, so
 # it runs in a terminal the way Omarchy's own installers do.
 in_terminal() {
@@ -275,6 +314,7 @@ main_menu() {
 		"$(printf '🪡\tStitch rows\t%s' "$(get rows)")" \
 		"$(printf '🧺\tWool for other apps\t%s' "$(get basket)")" \
 		"$(printf '🌗\tDarken unfocused\t%s' "$(get dim)")" \
+		"$(printf '✨\tFocus transition\t%s' "$(transition_title)")" \
 		"$(printf '🧶\t%s' "$onoff")" \
 		"$(printf '🔄\tReload charts and colourways')" \
 		"$(printf '🗑\tUninstall knitting')") in
@@ -284,6 +324,7 @@ main_menu() {
 	"Stitch rows") rows_menu ;;
 	"Wool for other apps") basket_menu ;;
 	"Darken unfocused") menu_dim ;;
+	"Focus transition") transition_menu ;;
 	"Put sweaters on" | "Take sweaters off") toggle ;;
 	"Reload charts and colourways")
 		hyprctl hyprknit-reload >/dev/null
@@ -308,10 +349,11 @@ rounding) rounding_menu ;;
 rows) rows_menu ;;
 basket) basket_menu ;;
 dim) menu_dim ;;
+transition) transition_menu ;;
 toggle) toggle ;;
 next | previous) step "$1" ;;
 *)
-	echo "Usage: hyprknit-menu [pattern|width|rounding|rows|basket|dim|toggle|next|previous]" >&2
+	echo "Usage: hyprknit-menu [pattern|width|rounding|rows|basket|dim|transition|toggle|next|previous]" >&2
 	exit 2
 	;;
 esac

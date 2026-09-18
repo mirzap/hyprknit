@@ -163,7 +163,7 @@ refresh)
 status)
 	if is_loaded; then
 		printf 'hyprknit is enabled\n'
-		for key in pattern stitch basket anchor width rows dim; do
+		for key in pattern stitch basket anchor width rows dim focus_transition_ms; do
 			printf '  %-8s %s\n' "$key" \
 				"$(hyprctl getoption "plugin:hyprknit:$key" | awk '/^(str|int|float):/ { print $2 }')"
 		done
@@ -189,10 +189,14 @@ anchor)
 width | rows | dim)
 	set_option "$1" "${2:?a number}" plain
 	;;
+transition)
+	set_option focus_transition_ms "${2:?milliseconds}" plain
+	;;
 *)
 	printf 'Usage: %s {enable|disable|reload|refresh|status}\n' "${0##*/}" >&2
 	printf '       %s {pattern NAME|stitch NAME|basket NAME|anchor NAME}\n' "${0##*/}" >&2
 	printf '       %s {width N|rows N|dim 0..1}\n' "${0##*/}" >&2
+	printf '       %s transition MILLISECONDS\n' "${0##*/}" >&2
 	exit 2
 	;;
 esac

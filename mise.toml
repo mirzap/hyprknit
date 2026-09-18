@@ -1,0 +1,2 @@
+[env]
+HYPRKNIT_BUILD_DIR = "{{config_root}}/build"

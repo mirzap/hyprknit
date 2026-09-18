@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install dependencies
+        run: >-
+          pacman -Syu --noconfirm
+          cmake ninja hyprland gdk-pixbuf2 gcc pkgconf shellcheck just zsh
+      - name: Check shell scripts
+        run: shellcheck -x hyprknitctl omarchy/hyprknit-menu omarchy/hyprknit-plugin scripts/unload-check.sh tests/*.sh
+      - name: Build and test
+        run: just test

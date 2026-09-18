@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.mirzap.hyprknit",
+  "name": "Hyprknit",
+  "version": "0.2.1",
+  "author": "Mirza Pasic",
+  "license": "GPL-3.0-only",
+  "description": "A bar widget for knitted Hyprland window borders",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "omarchy/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Hyprknit",
+    "description": "Pick a sweater pattern and tune the knitting",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

@@ -1,0 +1,220 @@
+#!/bin/bash
+# Install, load and remove the knitting — the Hyprland half of Hyprknit.
+#
+#   hyprknit-plugin install     build it for this Hyprland, load it, and load it at every login
+#   hyprknit-plugin load        load it, rebuilding first if Hyprland or the source changed
+#   hyprknit-plugin uninstall   unload it and forget it at login
+#   hyprknit-plugin status
+#
+# Omarchy's hyprland package ships the headers of exactly the Hyprland it
+# installs, so the plugin is built against those: nothing is downloaded, and
+# after an upgrade the next login rebuilds it to match.
+
+set -euo pipefail
+
+STATE="${XDG_DATA_HOME:-$HOME/.local/share}/hyprknit"
+BUILD="${XDG_CACHE_HOME:-$HOME/.cache}/hyprknit/build"
+AUTOSTART="$HOME/.config/hypr/autostart.lua"
+MARK="-- hyprknit: load the knitting at login"
+TOOLS=(cmake ninja gcc pkgconf gdk-pixbuf2)
+
+# The repo to build from. Run from the Omarchy plugin's clone, that is the clone
+# itself; run from the copy the login hook uses, it is the clone recorded at
+# install time.
+SELF=$(readlink -f "$0")
+if [[ $SELF == "$STATE/hyprknit-plugin" ]]; then
+	SOURCE=$(cat "$STATE/source" 2>/dev/null || true)
+else
+	SOURCE=$(cd "$(dirname "$SELF")/.." && pwd)
+fi
+
+# After `omarchy plugin update` the clone carries a newer version of this script
+# than the copy the login hook runs. Switch to it, so fixes arrive at the next
+# login. The rename gives the copy a new inode, so this running shell keeps
+# reading the old one undisturbed.
+if [[ $SELF == "$STATE/hyprknit-plugin" && -f $SOURCE/omarchy/hyprknit-plugin ]] &&
+	! cmp -s "$SELF" "$SOURCE/omarchy/hyprknit-plugin"; then
+	install -m 755 "$SOURCE/omarchy/hyprknit-plugin" "$SELF.new"
+	mv -f "$SELF.new" "$SELF"
+	exec "$SELF" "$@"
+fi
+
+say() {
+	echo "hyprknit: $*"
+	omarchy-notification-send "Hyprknit" "$*" 2>/dev/null ||
+		notify-send "Hyprknit" "$*" 2>/dev/null || true
+}
+
+fail() {
+	say "$*"
+	exit 1
+}
+
+is_loaded() {
+	hyprctl plugin list 2>/dev/null | grep -q '^Plugin hyprknit '
+}
+
+# An upgrade replaces Hyprland and its libraries on disk while this session keeps
+# running the old ones. A plugin built against the new headers must not be loaded
+# into it; the next login starts the new Hyprland and loads cleanly.
+compositor_is_stale() {
+	local pid
+	# the instance hyprctl talks to, which is not always the only Hyprland
+	pid=$(hyprctl instances -j 2>/dev/null | jq -r --arg sig "${HYPRLAND_INSTANCE_SIGNATURE:-}" \
+		'(map(select(.instance == $sig)) + .)[0].pid // empty')
+	[[ -n $pid ]] || return 1
+	[[ $(readlink "/proc/$pid/exe") == *' (deleted)' ]] && return 0
+	# Only system libraries count: an unloaded plugin, hyprknit's own old builds
+	# included, stays mapped after its file is deleted, and is not an upgrade.
+	grep -qE ' /usr/[^ ]*\.so[.0-9]* \(deleted\)$' "/proc/$pid/maps"
+}
+
+# Everything a build depends on: the Hyprland headers and the libraries they
+# describe, and the source. Any change means the next load rebuilds.
+identity() {
+	{
+		pacman -Q hyprland aquamarine hyprutils hyprlang hyprgraphics hyprcursor 2>/dev/null
+		git -C "$SOURCE" rev-parse HEAD 2>/dev/null
+		git -C "$SOURCE" diff HEAD -- src CMakeLists.txt 2>/dev/null
+	} | sha256sum | cut -c1-16
+}
+
+ensure_tools() {
+	omarchy-pkg-missing "${TOOLS[@]}" >/dev/null 2>&1 || return 0
+	[[ -t 0 ]] || fail "Build tools are missing. Open the Hyprknit menu and choose Install native knitting."
+	echo "Installing build tools: ${TOOLS[*]}"
+	omarchy-pkg-add "${TOOLS[@]}"
+}
+
+build() {
+	[[ -n $SOURCE && -f $SOURCE/CMakeLists.txt ]] ||
+		fail "The source at $SOURCE is gone. Reinstall with: omarchy plugin add https://github.com/mirzap/hyprknit"
+	ensure_tools
+
+	local id
+	id=$(identity)
+	echo "Building the knitting for $(pacman -Q hyprland)…"
+	cmake -S "$SOURCE" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF >/dev/null
+	cmake --build "$BUILD" --target hyprknit
+
+	# Hyprland keeps a loaded plugin mapped, so a build never overwrites a file:
+	# each one gets its own name, and older ones are dropped once unused.
+	mkdir -p "$STATE"
+	[[ -f $STATE/hyprknit-$id.so ]] || install -m 755 "$BUILD/hyprknit.so" "$STATE/hyprknit-$id.so"
+	echo "$id" >"$STATE/built"
+	local loaded
+	loaded=$(cat "$STATE/loaded" 2>/dev/null || true)
+	for old in "$STATE"/hyprknit-*.so; do
+		[[ $old == "$STATE/hyprknit-$id.so" || $old == "$loaded" ]] || rm -f "$old"
+	done
+}
+
+load() {
+	local id want loaded
+	if [[ ! -f $SOURCE/CMakeLists.txt ]]; then
+		remove_autostart
+		rm -rf "$STATE" "$(dirname "$BUILD")"
+		say "The Omarchy plugin was removed; cleaned up its knitting installation."
+		return 0
+	fi
+	id=$(identity)
+	want=$STATE/hyprknit-$id.so
+	loaded=$(cat "$STATE/loaded" 2>/dev/null || true)
+	if is_loaded; then
+		if [[ -z $loaded ]]; then
+			echo "hyprknit: already loaded from elsewhere; leaving it alone"
+			return 0
+		fi
+		if [[ $loaded == "$want" && -f $want ]]; then
+			echo "hyprknit: already loaded"
+			restore_autostart
+			return 0
+		fi
+	fi
+	compositor_is_stale &&
+		fail "Hyprland was upgraded after you logged in. Log out and back in to load the knitting."
+
+	if [[ $(cat "$STATE/built" 2>/dev/null || true) != "$id" || ! -f $want ]]; then
+		say "Knitting for this Hyprland and source, this takes a moment…"
+		build
+	fi
+	# An older build is still loaded after an update: swap it for the new one.
+	if is_loaded; then
+		hyprctl plugin unload "$loaded" >/dev/null
+		sleep 0.5
+	fi
+	hyprctl plugin load "$want" >/dev/null
+	echo "$want" >"$STATE/loaded"
+	# Run from an updated clone, keep the login hook's copy of this script current.
+	[[ $SELF == "$STATE/hyprknit-plugin" || ! -f $STATE/hyprknit-plugin ]] ||
+		install -m 755 "$SELF" "$STATE/hyprknit-plugin"
+	[[ $loaded == "$want" || -z $loaded ]] || rm -f "$loaded"
+	restore_autostart
+}
+
+add_autostart() {
+	mkdir -p "$(dirname "$AUTOSTART")"
+	touch "$AUTOSTART"
+	grep -qF -e "$MARK" "$AUTOSTART" && return 0
+	printf '\n%s\no.exec_on_start("%s load") %s\n' "$MARK" "$STATE/hyprknit-plugin" "-- hyprknit" >>"$AUTOSTART"
+}
+
+# The bar polls this while the knitting is installed, repairing the login line
+# if an Omarchy configuration refresh replaced autostart.lua.
+restore_autostart() {
+	[[ -f $STATE/source && -x $STATE/hyprknit-plugin ]] || return 0
+	grep -qF -e "$MARK" "$AUTOSTART" 2>/dev/null && return 0
+	add_autostart
+	say "Restored the line that loads the knitting at login."
+}
+
+remove_autostart() {
+	[[ -f $AUTOSTART ]] || return 0
+	sed -i -e "\|^$MARK\$|d" -e '\|-- hyprknit$|d' "$AUTOSTART"
+}
+
+install_knitting() {
+	build
+	# The login hook runs this script from $STATE, so it keeps working even if
+	# the bar widget is moved; it remembers where the source lives.
+	[[ $SELF == "$STATE/hyprknit-plugin" ]] || install -m 755 "$SELF" "$STATE/hyprknit-plugin"
+	echo "$SOURCE" >"$STATE/source"
+	add_autostart
+	load
+	say "Sweaters on. They come back at every login."
+}
+
+uninstall_knitting() {
+	remove_autostart
+	if is_loaded; then
+		local loaded
+		loaded=$(cat "$STATE/loaded" 2>/dev/null || true)
+		[[ -n $loaded ]] || fail "Hyprknit was loaded from somewhere else; unload it with hyprctl plugin unload"
+		hyprctl plugin unload "$loaded" >/dev/null
+	fi
+	rm -rf "$STATE" "$(dirname "$BUILD")"
+	say "Sweaters off, and they stay off at login."
+}
+
+status() {
+	if is_loaded; then
+		echo "loaded from $(cat "$STATE/loaded" 2>/dev/null || echo 'an unknown path')"
+	elif [[ -f $STATE/built ]]; then
+		echo "installed, not loaded"
+	else
+		echo "not installed"
+	fi
+	grep -qF -e "$MARK" "$AUTOSTART" 2>/dev/null && echo "loads at login" || echo "does not load at login"
+}
+
+case ${1:-status} in
+install) install_knitting ;;
+load) load ;;
+repair) restore_autostart ;;
+uninstall) uninstall_knitting ;;
+status) status ;;
+*)
+	echo "Usage: hyprknit-plugin {install|load|repair|uninstall|status}" >&2
+	exit 2
+	;;
+esac

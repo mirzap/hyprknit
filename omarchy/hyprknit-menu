@@ -1,0 +1,274 @@
+#!/bin/bash
+# Hyprknit's menu, opened from its bar widget.
+#
+#   hyprknit-menu                 the knitting menu
+#   hyprknit-menu pattern         jump straight to one setting's choices
+#                                 (pattern, width, rows, basket, dim)
+#   hyprknit-menu toggle          take the sweaters off, or put them back on
+#   hyprknit-menu next|previous   step through the shared patterns
+#
+# Everything goes through hyprctl, so this needs nothing but a loaded plugin.
+
+set -euo pipefail
+
+# Installs, loads and removes the Hyprland plugin itself.
+PLUGIN="$(dirname "$(readlink -f "$0")")/hyprknit-plugin"
+INSTALLED="${XDG_DATA_HOME:-$HOME/.local/share}/hyprknit/built"
+
+# What the wheel steps through: By App, then the shared patterns the Mac app
+# offers in its own menu.
+CYCLE=(by-app zigzag picnic ribbon posy twinkle candy-stripe)
+
+notify() {
+	omarchy-notification-send "$@" 2>/dev/null || notify-send "$@" 2>/dev/null || true
+}
+
+get() {
+	hyprctl -j getoption "plugin:hyprknit:$1" 2>/dev/null |
+		jq -r '[.str, .int, .float, .bool][] | select(. != null)' 2>/dev/null || true
+}
+
+apply() {
+	hyprctl eval "hl.config({ plugin = { hyprknit = { $1 = $2 } } })" >/dev/null
+	hyprctl hyprknit-reload >/dev/null
+}
+
+# A value only ever reaches Hyprland's Lua config as a quoted name or a plain
+# number, so neither can carry anything else in with it.
+set_string() {
+	[[ $2 =~ ^[A-Za-z0-9._-]+$ ]] || exit 0
+	apply "$1" "\"$2\""
+}
+
+set_number() {
+	[[ $2 =~ ^[0-9]+(\.[0-9]+)?$ ]] || exit 0
+	apply "$1" "$2"
+}
+
+# omarchy-menu-select rows are "<glyph><TAB><label>[<TAB><subtext>]", and a row
+# with a subtext comes back as "<label><TAB><subtext>", so the label is field 1.
+pick() {
+	local prompt=$1 choice
+	shift
+	choice=$(printf '%s\n' "$@" | omarchy-menu-select "$prompt") || exit 0
+	cut -f1 <<<"$choice"
+}
+
+# One choice, marked when it is the value already in use.
+row() {
+	local glyph=$1 value=$2 current=$3
+	if [[ $value == "$current" ]]; then
+		printf '%s\t%s\tcurrent' "$glyph" "$value"
+	else
+		printf '%s\t%s' "$glyph" "$value"
+	fi
+}
+
+# Rows for a fixed list of values, all under one glyph.
+rows() {
+	local glyph=$1 current=$2 value
+	shift 2
+	for value in "$@"; do
+		row "$glyph" "$value" "$current"
+		printf '\n'
+	done
+}
+
+is_off() {
+	local enabled
+	enabled=$(get enabled)
+	[[ $enabled == 0 || $enabled == false ]]
+}
+
+pattern_title() {
+	local pattern name title
+	pattern=$(get pattern)
+	case $pattern in
+	by-app) echo "By App" ;;
+	none) get stitch | sed 's/^./\u&/' ;;
+	*)
+		while IFS=$'\t' read -r name title; do
+			[[ $name == "$pattern" ]] && { echo "$title"; return; }
+		done < <(hyprctl hyprknit-patterns)
+		echo "$pattern"
+		;;
+	esac
+}
+
+# The Mac app's Pattern menu: By App, the two plain stitches, its six featured
+# patterns, then the user's own charts. The app colourways' charts are what By
+# App uses, so they are not offered on their own.
+menu_pattern() {
+	local pattern stitch current title name choice glyph
+	local -A key=([By App]=by-app [Stockinette]=none:stockinette [Rib]=none:rib)
+	local titles=("By App" Stockinette Rib)
+	pattern=$(get pattern)
+	stitch=$(get stitch)
+	current=$pattern
+	[[ $pattern == none ]] && current=none:$stitch
+
+	# A knitting build older than this menu lists bare names; until the next
+	# login rebuilds it, the menu offers By App and the plain stitches only.
+	while IFS=$'\t' read -r name title; do
+		[[ -n $name && -n $title ]] || continue
+		key[$title]=$name
+		titles+=("$title")
+	done < <(hyprctl hyprknit-patterns)
+
+	local choices=()
+	for title in "${titles[@]}"; do
+		case ${key[$title]} in
+		by-app) glyph=🧶 ;; none:*) glyph=🧵 ;; *) glyph=🎨 ;;
+		esac
+		if [[ ${key[$title]} == "$current" ]]; then
+			choices+=("$(printf '%s\t%s\tcurrent' "$glyph" "$title")")
+		else
+			choices+=("$(printf '%s\t%s' "$glyph" "$title")")
+		fi
+	done
+	# A pattern set by hand that the menu does not list stays visible, as the
+	# Mac app shows it, so choosing it again is possible and nothing is hidden.
+	local listed=0
+	for title in "${titles[@]}"; do [[ ${key[$title]} == "$current" ]] && listed=1; done
+	if ((!listed)); then
+		key["Current: $pattern"]=$pattern
+		choices+=("$(printf '🎨\tCurrent: %s\tcurrent' "$pattern")")
+	fi
+
+	choice=$(pick "Sweater pattern" "${choices[@]}")
+	[[ -n $choice ]] || return 0 # dismissed
+	case ${key[$choice]:-} in
+	"") ;;
+	none:*)
+		set_string stitch "${key[$choice]#none:}"
+		set_string pattern none
+		;;
+	*) set_string pattern "${key[$choice]}" ;;
+	esac
+}
+
+menu_setting() {
+	local setting=$1 kind=$2 prompt=$3 glyph=$4
+	local -a choices
+	shift 4
+	mapfile -t choices < <(rows "$glyph" "$(get "$setting")" "$@")
+	"set_$kind" "$setting" "$(pick "$prompt" "${choices[@]}")"
+}
+
+menu_dim() {
+	case $(pick "Darken unfocused windows" \
+		"$(printf '🌗\toff')" "$(printf '🌗\tlight')" \
+		"$(printf '🌗\tmedium')" "$(printf '🌗\tstrong')") in
+	off) set_number dim 0 ;;
+	light) set_number dim 0.15 ;;
+	medium) set_number dim 0.3 ;;
+	strong) set_number dim 0.5 ;;
+	esac
+}
+
+# Building shows progress, and a password prompt if build tools are missing, so
+# it runs in a terminal the way Omarchy's own installers do.
+in_terminal() {
+	omarchy-launch-floating-terminal-with-presentation "$(printf '%q ' "$PLUGIN" "$@")"
+}
+
+# Shown while the knitting is not loaded: either it was never installed, or it
+# is installed but did not load (for instance straight after an upgrade).
+setup_menu() {
+	if [[ -f $INSTALLED ]]; then
+		case $(pick "Hyprknit" \
+			"$(printf '🧶\tLoad knitting')" \
+			"$(printf '🗑\tUninstall knitting')") in
+		"Load knitting") in_terminal load ;;
+		"Uninstall knitting") in_terminal uninstall ;;
+		esac
+	else
+		case $(pick "Hyprknit" \
+			"$(printf '🧶\tInstall native knitting\tbuilds for Hyprland and loads at login')") in
+		"Install native knitting") in_terminal install ;;
+		esac
+	fi
+}
+
+toggle() {
+	if is_off; then
+		apply enabled true
+		notify "Hyprknit" "Sweaters on"
+	else
+		apply enabled false
+		notify "Hyprknit" "Sweaters off"
+	fi
+}
+
+step() {
+	local current index=0 i count=${#CYCLE[@]}
+	current=$(get pattern)
+	for i in "${!CYCLE[@]}"; do
+		[[ ${CYCLE[$i]} == "$current" ]] && index=$i
+	done
+	if [[ $1 == next ]]; then
+		index=$(((index + 1) % count))
+	else
+		index=$(((index - 1 + count) % count))
+	fi
+	set_string pattern "${CYCLE[$index]}"
+}
+
+width_menu() {
+	menu_setting width number "Border width" 📏 6 12 14 18 28
+}
+rows_menu() {
+	menu_setting rows number "Stitch rows" 🪡 4 5 6 8 10 12
+}
+basket_menu() {
+	menu_setting basket string "Wool for other apps" 🧺 \
+		wool sorbet forest mono dopamine neon punch
+}
+
+main_menu() {
+	local onoff="Take sweaters off"
+	is_off && onoff="Put sweaters on"
+	case $(pick "Hyprknit" \
+		"$(printf '🎨\tPattern\t%s' "$(pattern_title)")" \
+		"$(printf '📏\tBorder width\t%s px' "$(get width)")" \
+		"$(printf '🪡\tStitch rows\t%s' "$(get rows)")" \
+		"$(printf '🧺\tWool for other apps\t%s' "$(get basket)")" \
+		"$(printf '🌗\tDarken unfocused\t%s' "$(get dim)")" \
+		"$(printf '🧶\t%s' "$onoff")" \
+		"$(printf '🔄\tReload charts and colourways')" \
+		"$(printf '🗑\tUninstall knitting')") in
+	Pattern) menu_pattern ;;
+	"Border width") width_menu ;;
+	"Stitch rows") rows_menu ;;
+	"Wool for other apps") basket_menu ;;
+	"Darken unfocused") menu_dim ;;
+	"Put sweaters on" | "Take sweaters off") toggle ;;
+	"Reload charts and colourways")
+		hyprctl hyprknit-reload >/dev/null
+		notify "Hyprknit" "Charts and colourways reloaded"
+		;;
+	"Uninstall knitting") in_terminal uninstall ;;
+	esac
+}
+
+# Without the plugin there is nothing to set: the menu offers to install or load
+# it, and the wheel and right click do nothing.
+if [[ -z $(get pattern) ]]; then
+	[[ -z ${1:-} ]] && setup_menu
+	exit 0
+fi
+
+case ${1:-} in
+"") main_menu ;;
+pattern) menu_pattern ;;
+width) width_menu ;;
+rows) rows_menu ;;
+basket) basket_menu ;;
+dim) menu_dim ;;
+toggle) toggle ;;
+next | previous) step "$1" ;;
+*)
+	echo "Usage: hyprknit-menu [pattern|width|rows|basket|dim|toggle|next|previous]" >&2
+	exit 2
+	;;
+esac

@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+build_dir="${HYPRKNIT_BUILD_DIR:-$project_dir/build}"
+plugin="$build_dir/hyprknit.so"
+live_dir="$project_dir/.cache/live"
+live_path_file="$project_dir/.cache/live-path"
+
+require_build() {
+	if [[ ! -f "$plugin" ]]; then
+		printf 'hyprknit is not built. Run: just -d %q build\n' "$project_dir" >&2
+		exit 1
+	fi
+}
+
+is_loaded() {
+	hyprctl plugin list 2>/dev/null | grep -Fq 'hyprknit'
+}
+
+require_loaded() {
+	if ! is_loaded; then
+		printf 'hyprknit is disabled; enable it first\n' >&2
+		exit 1
+	fi
+}
+
+# A system upgrade replaces Hyprland and its libraries on disk while the running
+# compositor keeps the old ones mapped. The plugin is compiled against the new
+# headers, and a same-tag rebuild keeps the commit hash the plugin checks, so
+# nothing else would notice the mismatch before a crash.
+compositor_is_stale() {
+	local pid
+	# the instance hyprctl talks to, which is not always the only Hyprland
+	pid=$(hyprctl instances -j 2>/dev/null | jq -r --arg sig "${HYPRLAND_INSTANCE_SIGNATURE:-}" \
+		'(map(select(.instance == $sig)) + .)[0].pid // empty')
+	[[ -n $pid ]] || return 1
+	[[ $(readlink "/proc/$pid/exe") == *' (deleted)' ]] && return 0
+	# Only system libraries count: an unloaded plugin, hyprknit's own old builds
+	# included, stays mapped after its file is deleted, and is not an upgrade.
+	grep -qE ' /usr/[^ ]*\.so[.0-9]* \(deleted\)$' "/proc/$pid/maps"
+}
+
+require_current_compositor() {
+	if compositor_is_stale; then
+		printf 'Hyprland or its libraries were upgraded after this session started.\n' >&2
+		printf 'Loading a plugin built against the new headers into it can crash the session.\n' >&2
+		printf 'Log out and back in first, then try again.\n' >&2
+		exit 1
+	fi
+}
+
+# Hyprland keeps a plugin's .so mapped, so a rebuilt file cannot replace the
+# loaded one in place. Each build is loaded from its own content-addressed copy.
+prepare_live_plugin() {
+	local digest live_plugin
+	digest=$(sha256sum "$plugin" | cut -c1-16)
+	live_plugin="$live_dir/hyprknit-$digest.so"
+	mkdir -p "$live_dir"
+	if [[ ! -f "$live_plugin" ]]; then
+		cp -- "$plugin" "$live_plugin"
+	fi
+	printf '%s\n' "$live_plugin"
+}
+
+loaded_path() {
+	if [[ -f "$live_path_file" ]]; then
+		command cat -- "$live_path_file"
+	fi
+}
+
+unload_current() {
+	local current
+	current=$(loaded_path || true)
+	if [[ -n "$current" ]]; then
+		hyprctl plugin unload "$current"
+	else
+		printf 'hyprknit is loaded from an unknown path; use hyprctl plugin unload <path>\n' >&2
+		exit 1
+	fi
+	rm -f -- "$live_path_file"
+}
+
+load_fresh() {
+	local live_plugin
+	require_current_compositor
+	live_plugin=$(prepare_live_plugin)
+	hyprctl plugin load "$live_plugin"
+	printf '%s\n' "$live_plugin" >"$live_path_file"
+}
+
+# A string option has to reach Hyprland quoted; a number must not be.
+set_option() {
+	local key=$1 value=$2 quoted=$3 active
+	require_loaded
+	if [[ "$quoted" == quoted ]]; then
+		[[ $value =~ ^[A-Za-z0-9._-]+$ ]] || {
+			printf '%s must contain only letters, numbers, dots, underscores, or hyphens\n' "$key" >&2
+			exit 2
+		}
+		hyprctl eval "hl.config({ plugin = { hyprknit = { $key = \"$value\" } } })" >/dev/null
+		active=$(hyprctl getoption "plugin:hyprknit:$key" | awk '/^str:/ { print $2 }')
+	else
+		[[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || {
+			printf '%s must be a non-negative number\n' "$key" >&2
+			exit 2
+		}
+		hyprctl eval "hl.config({ plugin = { hyprknit = { $key = $value } } })" >/dev/null
+		active=$(hyprctl getoption "plugin:hyprknit:$key" | awk '/^(int|float):/ { print $2 }')
+	fi
+	if [[ -z "$active" ]]; then
+		printf 'hyprknit %s: could not read the option back\n' "$key" >&2
+		exit 1
+	fi
+	# Setting a value does not itself tell the plugin to re-knit anything.
+	hyprctl hyprknit-reload >/dev/null
+	printf 'hyprknit %s: %s\n' "$key" "$active"
+}
+
+one_of() {
+	local value=$1 name=$2
+	shift 2
+	local option
+	for option in "$@"; do
+		[[ "$value" == "$option" ]] && return 0
+	done
+	printf '%s must be one of: %s\n' "$name" "$*" >&2
+	exit 2
+}
+
+case "${1:-status}" in
+enable)
+	require_build
+	if is_loaded; then
+		printf 'hyprknit is already enabled\n'
+	else
+		load_fresh
+		printf 'hyprknit enabled\n'
+	fi
+	;;
+disable)
+	if is_loaded; then
+		unload_current
+		printf 'hyprknit disabled\n'
+	else
+		printf 'hyprknit is already disabled\n'
+	fi
+	;;
+reload)
+	require_build
+	if is_loaded; then
+		unload_current
+	fi
+	load_fresh
+	printf 'hyprknit reloaded\n'
+	;;
+refresh)
+	# Re-read the yarn the user owns, without unloading the plugin.
+	require_loaded
+	hyprctl hyprknit-reload >/dev/null
+	printf 'charts and colourways reloaded\n'
+	;;
+status)
+	if is_loaded; then
+		printf 'hyprknit is enabled\n'
+		for key in pattern stitch basket anchor width rows dim; do
+			printf '  %-8s %s\n' "$key" \
+				"$(hyprctl getoption "plugin:hyprknit:$key" | awk '/^(str|int|float):/ { print $2 }')"
+		done
+	else
+		printf 'hyprknit is disabled\n'
+	fi
+	;;
+pattern)
+	set_option pattern "${2:?pattern name, by-app, or none}" quoted
+	;;
+stitch)
+	one_of "${2:-}" stitch stockinette rib garter
+	set_option stitch "$2" quoted
+	;;
+basket)
+	one_of "${2:-}" basket dopamine neon punch wool sorbet forest mono
+	set_option basket "$2" quoted
+	;;
+anchor)
+	one_of "${2:-}" anchor corner centre center
+	set_option anchor "$2" quoted
+	;;
+width | rows | dim)
+	set_option "$1" "${2:?a number}" plain
+	;;
+*)
+	printf 'Usage: %s {enable|disable|reload|refresh|status}\n' "${0##*/}" >&2
+	printf '       %s {pattern NAME|stitch NAME|basket NAME|anchor NAME}\n' "${0##*/}" >&2
+	printf '       %s {width N|rows N|dim 0..1}\n' "${0##*/}" >&2
+	exit 2
+	;;
+esac

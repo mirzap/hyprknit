@@ -20,7 +20,7 @@ plugin=$(realpath "${1:-build/hyprknit.so}")
 
 work=$(mktemp -d)
 trap 'kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; rm -rf "$work"' EXIT
-printf -- '-- throwaway nested session for hyprknit unload checks\nhl.config({ general = { gaps_out = 20 } })\n' >"$work/hyprland.lua"
+printf -- '-- throwaway nested session for hyprknit unload checks\nhl.config({ general = { gaps_out = 20, border_size = 7 } })\n' >"$work/hyprland.lua"
 
 # Each reload in a development session loads the plugin from a new path, and a
 # library that cannot be unmapped lingers between them. Three copies reproduce
@@ -45,15 +45,38 @@ done
 
 h() { HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl "$@"; }
 alive() { kill -0 "$pid" 2>/dev/null && h version >/dev/null 2>&1; }
+border_size() { h -j getoption general:border_size | jq -r '.int'; }
+wait_for_border() {
+	local expected=$1
+	for _ in $(seq 1 30); do
+		[[ $(border_size) == "$expected" ]] && return 0
+		sleep 0.1
+	done
+	return 1
+}
 
 failed=0
 step=0
+configured_border=7
 for copy in "${copies[@]}"; do
 	step=$((step + 1))
 	h plugin load "$copy" >/dev/null
+	wait_for_border 0 || { echo "copy $step: native border was not hidden"; failed=1; break; }
 	h eval 'hl.config({ plugin = { hyprknit = { pattern = "zigzag" } } })' >/dev/null
 	h hyprknit-reload >/dev/null 2>&1
+	h eval 'hl.config({ plugin = { hyprknit = { enabled = false } } })' >/dev/null
+	h hyprknit-reload >/dev/null 2>&1
+	wait_for_border "$configured_border" || { echo "copy $step: native border was not restored when disabled"; failed=1; break; }
+	h eval 'hl.config({ plugin = { hyprknit = { enabled = true } } })' >/dev/null
+	h hyprknit-reload >/dev/null 2>&1
+	wait_for_border 0 || { echo "copy $step: native border was not hidden after re-enable"; failed=1; break; }
+	next_border=$((step - 1))
+	sed -i "s/border_size = $configured_border/border_size = $next_border/" "$work/hyprland.lua"
+	h reload >/dev/null 2>&1
+	wait_for_border 0 || { echo "copy $step: native border returned after config reload"; failed=1; break; }
+	configured_border=$next_border
 	h plugin unload "$copy" >/dev/null 2>&1
+	wait_for_border "$configured_border" || { echo "copy $step: latest native border was not restored on unload"; failed=1; break; }
 	sleep 1
 	h reload >/dev/null 2>&1
 	sleep 1

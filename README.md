@@ -71,12 +71,9 @@ just disable
 `hyprknitctl` refuses to load the plugin into a Hyprland that has been upgraded
 since the session started, since that is exactly the mismatch that crashes it.
 
-Hyprland draws its own border too, which shows as a hard line just inside the
-knitting. Turn it off so the sweater is the only edge:
-
-```lua
-hl.config({ general = { border_size = 0 } })
-```
+While the sweaters are on, Hyprknit temporarily hides Hyprland's native border
+globally so the knitting is the only edge. Turning the sweaters off or unloading
+the plugin restores the border size that was active before Hyprknit hid it.
 
 ## Make yourself cosy
 

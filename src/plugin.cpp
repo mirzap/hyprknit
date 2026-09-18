@@ -215,7 +215,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
       });
   state.configReloaded = Event::bus()->m_events.config.reloaded.listen([]() {
     safely("config reload", [] {
-      applySettings();
+      applySettings(false, true);
       updateDecorations();
     });
   });
@@ -229,7 +229,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
   HyprlandAPI::addNotification(
       handle, std::format("[hyprknit] {} sweaters cast on", charts().size()),
       CHyprColor{0.35, 0.85, 0.65, 1.0}, 4000);
-  return {"hyprknit", "Knitted window borders", "Mirza", "0.2.2"};
+  return {"hyprknit", "Knitted window borders", "Mirza", "0.2.3"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
@@ -240,6 +240,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
   state.alive = false;
   state.windowOpened.reset();
   state.configReloaded.reset();
+  restoreNativeBorder();
   g_pHyprRenderer->m_renderPass.removeAllOfType("KnitPassElement");
   flushTileCache();
 }

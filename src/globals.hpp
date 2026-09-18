@@ -41,7 +41,11 @@ extern State state;
 /// Re-read the settings that live outside the per-window geometry, flush the
 /// tile cache if any of them moved, and bump `generation` when they did. Pass
 /// `force` after the chart collection has been rebuilt, when a setting that has
-/// not itself changed may now resolve differently.
-void applySettings(bool force = false);
+/// not itself changed may now resolve differently. `configReloaded` preserves
+/// the newly loaded native border value before hiding it again.
+void applySettings(bool force = false, bool configReloaded = false);
+
+/// Put Hyprland's native border back if Hyprknit temporarily hid it.
+void restoreNativeBorder() noexcept;
 
 } // namespace hyprknit

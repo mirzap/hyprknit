@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.mirzap.hyprknit",
   "name": "Hyprknit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Mirza Pasic",
   "license": "GPL-3.0-only",
   "description": "A bar widget for knitted Hyprland window borders",

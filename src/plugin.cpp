@@ -229,7 +229,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
   HyprlandAPI::addNotification(
       handle, std::format("[hyprknit] {} sweaters cast on", charts().size()),
       CHyprColor{0.35, 0.85, 0.65, 1.0}, 4000);
-  return {"hyprknit", "Knitted window borders", "Mirza", "0.2.1"};
+  return {"hyprknit", "Knitted window borders", "Mirza", "0.2.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

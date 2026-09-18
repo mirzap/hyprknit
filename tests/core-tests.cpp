@@ -194,6 +194,10 @@ void testRingGeometry() {
   require(pixelAt(pixels, band.frameWidth / 2, band.band + 4).a == 0,
           "the window's own area is left untouched");
   require(pixelAt(pixels, 1, 1).a == 0, "the outer corner is rounded away");
+  require(pixelAt(pixels, 26, 26).a > 0,
+          "the band follows the rounded inner corner");
+  require(pixelAt(pixels, 36, 36).a == 0,
+          "the inside of the rounded border stays transparent");
 
   // Every pixel of the ring has to be knitted by exactly one side. A mitre that
   // does not reach far enough leaves bare holes on the corner arcs.

@@ -26,7 +26,9 @@ seconds, plus any build tools it has to install first.
 After that the same menu sets the pattern — By App, plain Stockinette or Rib,
 the six shared patterns (Zigzag, Picnic Checks, Ribbon Stripes, Little Bows,
 Tiny Stars, Candy Stripes) and any charts of your own — plus border width,
-stitch rows, wool and dimming. Right click takes the sweaters off or puts them back on, and
+corner radius, stitch rows, wool and dimming. The radius rounds both the outside
+and the window-facing inside of the knitted band. Right click takes the sweaters
+off or puts them back on, and
 scrolling over the yarn steps through the shared patterns.
 
 When an Omarchy update upgrades Hyprland, the next login notices and rebuilds the

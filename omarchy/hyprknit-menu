@@ -3,7 +3,7 @@
 #
 #   hyprknit-menu                 the knitting menu
 #   hyprknit-menu pattern         jump straight to one setting's choices
-#                                 (pattern, width, rows, basket, dim)
+#                                 (pattern, width, rounding, rows, basket, dim)
 #   hyprknit-menu toggle          take the sweaters off, or put them back on
 #   hyprknit-menu next|previous   step through the shared patterns
 #
@@ -166,6 +166,46 @@ menu_dim() {
 	esac
 }
 
+rounding_title() {
+	local current
+	current=$(get rounding)
+	case $current in
+	-1) echo "Follow window" ;;
+	0) echo "Square" ;;
+	*) printf '%s px\n' "$current" ;;
+	esac
+}
+
+rounding_menu() {
+	local current choice
+	current=$(get rounding)
+	rounding_row() {
+		local label=$1 value=$2
+		if [[ $current == "$value" ]]; then
+			printf '▢\t%s\tcurrent' "$label"
+		elif [[ $value == -1 ]]; then
+			printf '▢\t%s' "$label"
+		else
+			printf '▢\t%s\t%s px' "$label" "$value"
+		fi
+	}
+	choice=$(pick "Corner radius" \
+		"$(rounding_row 'Follow window' -1)" \
+		"$(rounding_row Square 0)" \
+		"$(rounding_row Soft 8)" \
+		"$(rounding_row Rounded 12)" \
+		"$(rounding_row Round 20)" \
+		"$(rounding_row 'Extra round' 32)")
+	case $choice in
+	"Follow window") apply rounding -1 ;;
+	Square) set_number rounding 0 ;;
+	Soft) set_number rounding 8 ;;
+	Rounded) set_number rounding 12 ;;
+	Round) set_number rounding 20 ;;
+	"Extra round") set_number rounding 32 ;;
+	esac
+}
+
 # Building shows progress, and a password prompt if build tools are missing, so
 # it runs in a terminal the way Omarchy's own installers do.
 in_terminal() {
@@ -231,6 +271,7 @@ main_menu() {
 	case $(pick "Hyprknit" \
 		"$(printf '🎨\tPattern\t%s' "$(pattern_title)")" \
 		"$(printf '📏\tBorder width\t%s px' "$(get width)")" \
+		"$(printf '▢\tCorner radius\t%s' "$(rounding_title)")" \
 		"$(printf '🪡\tStitch rows\t%s' "$(get rows)")" \
 		"$(printf '🧺\tWool for other apps\t%s' "$(get basket)")" \
 		"$(printf '🌗\tDarken unfocused\t%s' "$(get dim)")" \
@@ -239,6 +280,7 @@ main_menu() {
 		"$(printf '🗑\tUninstall knitting')") in
 	Pattern) menu_pattern ;;
 	"Border width") width_menu ;;
+	"Corner radius") rounding_menu ;;
 	"Stitch rows") rows_menu ;;
 	"Wool for other apps") basket_menu ;;
 	"Darken unfocused") menu_dim ;;
@@ -262,13 +304,14 @@ case ${1:-} in
 "") main_menu ;;
 pattern) menu_pattern ;;
 width) width_menu ;;
+rounding) rounding_menu ;;
 rows) rows_menu ;;
 basket) basket_menu ;;
 dim) menu_dim ;;
 toggle) toggle ;;
 next | previous) step "$1" ;;
 *)
-	echo "Usage: hyprknit-menu [pattern|width|rows|basket|dim|toggle|next|previous]" >&2
+	echo "Usage: hyprknit-menu [pattern|width|rounding|rows|basket|dim|toggle|next|previous]" >&2
 	exit 2
 	;;
 esac
